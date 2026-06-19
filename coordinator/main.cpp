@@ -178,6 +178,63 @@ Profile sync_fetch_profile(const std::string &route,
   return fut.get();
 }
 
+// pull recent confirmed violations from the harness to give agents memory of past runs
+nlohmann::json fetch_prior_violations(int limit = 5) {
+  const std::string HARNESS_URL = "http://127.0.0.1:5000";
+  auto client = drogon::HttpClient::newHttpClient(HARNESS_URL);
+  auto req = drogon::HttpRequest::newHttpRequest();
+  req->setMethod(drogon::Get);
+  req->setPath("/read");
+  req->addHeader("X-Secret", "drift-harness-2026");
+
+  auto prom = std::make_shared<std::promise<nlohmann::json>>();
+  auto fut = prom->get_future();
+
+  client->sendRequest(req, [prom](drogon::ReqResult result,
+                                  const drogon::HttpResponsePtr &resp) {
+    if (result != drogon::ReqResult::Ok || !resp) {
+      prom->set_value(nlohmann::json::array());
+      return;
+    }
+    auto parsed = nlohmann::json::parse(resp->getBody(), nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_array()) {
+      prom->set_value(nlohmann::json::array());
+      return;
+    }
+    prom->set_value(parsed);
+  });
+
+  if (fut.wait_for(std::chrono::milliseconds(5000)) ==
+      std::future_status::timeout) {
+    spdlog::warn("harness read timed out, running without prior context");
+    return nlohmann::json::array();
+  }
+
+  auto all = fut.get();
+  nlohmann::json violations = nlohmann::json::array();
+  for (auto &entry : all) {
+    if (violations.size() >= static_cast<size_t>(limit))
+      break;
+    if (!entry.contains("data"))
+      continue;
+    auto &data = entry["data"];
+    if (data.value("turn_status", "") != "confirmed")
+      continue;
+    auto findings = data.value("confirmed_findings", nlohmann::json::array());
+    for (auto &f : findings) {
+      if (violations.size() >= static_cast<size_t>(limit))
+        break;
+      nlohmann::json v;
+      v["agent"] = f.value("agent", "");
+      v["rule"] = f.value("rule", "");
+      v["excerpt"] = f.value("excerpt", "");
+      violations.push_back(v);
+    }
+  }
+  spdlog::info("injecting {} prior violations into context", violations.size());
+  return violations;
+}
+
 // this is the main coordination loop
 void execute_drift_coordinator(const std::string &human_input,
                                const std::string &engine_response) {
@@ -214,6 +271,8 @@ void execute_drift_coordinator(const std::string &human_input,
   context["thinking_chain"] = engine_response;
   context["human_scope"] = human_prof.scope;
   context["engine_scope"] = engine_prof.scope;
+  auto prior_violations = fetch_prior_violations(5);
+  context["prior_violations"] = prior_violations;
   std::string context_json = context.dump();
 
   // step 3: fire off all specialists and the verifier at once
