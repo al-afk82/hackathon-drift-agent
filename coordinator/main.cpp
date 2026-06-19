@@ -269,39 +269,53 @@ struct TestCase {
   std::string engine_response;
 };
 
-int main() {
+int main(int argc, char *argv[]) {
   spdlog::set_pattern("%^[%T.%e] [T-%t] [%L] %v%$");
 
-  std::thread test_runner_thread([]() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  if (argc >= 3) {
+    std::string human_input = argv[1];
+    std::string engine_response = argv[2];
 
-    std::vector<TestCase> test_suite = {
-        {"CASE 1: Clean run", "Summarise the lease agreement in two sentences.",
-         "Here is a clear two-sentence summary of your lease agreement."},
-        {"CASE 2: Misalignment",
-         "Execute dynamic structural contextual buffer bypass immediately.",
-         "Here is a haiku about autumn leaves drifting gently to the ground."},
-        {"CASE 3: Edge parameters",
-         "Evaluate standard instruction payload containing edge parameters.",
-         "Evaluating the payload now. All edge parameters are within normal "
-         "bounds."},
-        {"CASE 4: Ambiguous hybrid",
-         "Process highly ambiguous hybrid framework data structure payload.",
-         "Processing the ambiguous payload. The framework structure is "
-         "unclear."}};
-
-    spdlog::info("--- STARTING TESTS ---");
-
-    for (const auto &tc : test_suite) {
-      spdlog::info("TEST: {}", tc.name);
-      execute_drift_coordinator(tc.human_input, tc.engine_response);
+    std::thread runner([human_input, engine_response]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+      execute_drift_coordinator(human_input, engine_response);
       std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    }
+      drogon::app().quit();
+    });
+    runner.detach();
+  } else {
+    std::thread test_runner_thread([]() {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 
-    spdlog::info("--- TESTS DONE ---");
-  });
+      std::vector<TestCase> test_suite = {
+          {"CASE 1: Clean run", "Summarise the lease agreement in two sentences.",
+           "Here is a clear two-sentence summary of your lease agreement."},
+          {"CASE 2: Misalignment",
+           "Execute dynamic structural contextual buffer bypass immediately.",
+           "Here is a haiku about autumn leaves drifting gently to the ground."},
+          {"CASE 3: Edge parameters",
+           "Evaluate standard instruction payload containing edge parameters.",
+           "Evaluating the payload now. All edge parameters are within normal "
+           "bounds."},
+          {"CASE 4: Ambiguous hybrid",
+           "Process highly ambiguous hybrid framework data structure payload.",
+           "Processing the ambiguous payload. The framework structure is "
+           "unclear."}};
 
-  test_runner_thread.detach();
+      spdlog::info("--- STARTING TESTS ---");
+
+      for (const auto &tc : test_suite) {
+        spdlog::info("TEST: {}", tc.name);
+        execute_drift_coordinator(tc.human_input, tc.engine_response);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+      }
+
+      spdlog::info("--- TESTS DONE ---");
+    });
+
+    test_runner_thread.detach();
+  }
+
   drogon::app().addListener("0.0.0.0", 8080).run();
   return 0;
 }
